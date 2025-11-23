@@ -522,9 +522,11 @@ namespace ImageAnnotationApp.Forms
             listViewPreview.Columns.Clear();
             listViewPreview.Columns.Add("图片文件名", 300);
 
-            foreach (var folderName in _folders.Keys)
+            // 使用文件夹的 Name 属性而不是字典的 Key，确保显示最新的名称
+            var folderList = _folders.Values.OrderBy(f => f.Name).ToList();
+            foreach (var folder in folderList)
             {
-                listViewPreview.Columns.Add(folderName, 150);
+                listViewPreview.Columns.Add(folder.Name, 150);
             }
             listViewPreview.Columns.Add("状态", 100);
 
@@ -534,10 +536,11 @@ namespace ImageAnnotationApp.Forms
                 bool isComplete = true;
                 bool allUploaded = true;
 
-                foreach (var folderName in _folders.Keys)
+                // 按照列的顺序遍历文件夹
+                foreach (var folder in folderList)
                 {
-                    var hasLocal = _folders[folderName].FilePaths.Any(f => Path.GetFileName(f) == fileName);
-                    var hasUploaded = _folders[folderName].UploadedFileNames.Contains(fileName);
+                    var hasLocal = folder.FilePaths.Any(f => Path.GetFileName(f) == fileName);
+                    var hasUploaded = folder.UploadedFileNames.Contains(fileName);
 
                     if (hasUploaded)
                     {

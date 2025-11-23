@@ -33,6 +33,12 @@ namespace ImageAnnotationApp.Forms
         {
             this.Text = $"图片选择 - {_queueName}";
             this.Size = new Size(1000, 700);
+            this.StartPosition = FormStartPosition.CenterParent;
+
+            // 监听窗口大小变化
+            this.Resize += ImageSelectionForm_Resize;
+            this.SizeChanged += ImageSelectionForm_SizeChanged;
+            this.FormClosing += ImageSelectionForm_FormClosing;
 
             // 顶部工具栏
             var toolStrip = new ToolStrip();
@@ -98,6 +104,153 @@ namespace ImageAnnotationApp.Forms
             this.Controls.Add(toolStrip);
         }
 
+        private bool _isResizing = false;
+        private System.Windows.Forms.Timer? _resizeTimer;
+
+        private void ImageSelectionForm_Resize(object? sender, EventArgs e)
+        {
+            // 防止频繁调用，使用计时器延迟重新布局
+            if (_resizeTimer == null)
+            {
+                _resizeTimer = new System.Windows.Forms.Timer();
+                _resizeTimer.Interval = 300; // 300ms 延迟
+                _resizeTimer.Tick += (s, args) =>
+                {
+                    _resizeTimer?.Stop();
+                    _isResizing = false;
+                    if (_currentGroup != null && _currentGroup.Images.Count > 0)
+                    {
+                        RedrawImages();
+                    }
+                };
+            }
+
+            if (!_isResizing)
+            {
+                _isResizing = true;
+                _resizeTimer.Start();
+            }
+            else
+            {
+                _resizeTimer.Stop();
+                _resizeTimer.Start();
+            }
+        }
+
+        private void ImageSelectionForm_SizeChanged(object? sender, EventArgs e)
+        {
+            // 委托给 Resize 事件处理
+        }
+
+        private void ImageSelectionForm_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            // 清理定时器资源
+            if (_resizeTimer != null)
+            {
+                _resizeTimer.Stop();
+                _resizeTimer.Dispose();
+                _resizeTimer = null;
+            }
+        }
+
+        private void RedrawImages()
+        {
+            if (_currentGroup == null || _currentGroup.Images.Count == 0)
+                return;
+
+            // 暂停绘制
+            panelImages.SuspendLayout();
+
+            try
+            {
+                int imageCount = _currentGroup.Images.Count;
+
+                int panelWidth = panelImages.ClientSize.Width - 20;
+                int panelHeight = panelImages.ClientSize.Height - 20;
+
+                // 确保最小尺寸
+                if (panelWidth < 100 || panelHeight < 100)
+                    return;
+
+                int labelHeight = 20;
+                int spacing = 10;
+
+                // 计算最优的行列布局，使图片尽可能大
+                int bestCols = 1;
+                int bestImageSize = 0;
+
+                // 尝试不同的列数，找到能让图片最大的配置
+                for (int testCols = 1; testCols <= imageCount; testCols++)
+                {
+                    int testRows = (int)Math.Ceiling((double)imageCount / testCols);
+
+                    // 计算在这个布局下图片能有多大
+                    int maxWidth = (panelWidth - spacing) / testCols - spacing;
+                    int maxHeight = (panelHeight - spacing) / testRows - labelHeight - spacing;
+
+                    // 保持1:1比例
+                    int testImageSize = Math.Min(maxWidth, maxHeight);
+
+                    // 如果这个配置能让图片更大，则采用
+                    if (testImageSize > bestImageSize)
+                    {
+                        bestImageSize = testImageSize;
+                        bestCols = testCols;
+                    }
+                }
+
+                int cols = bestCols;
+                int rows = (int)Math.Ceiling((double)imageCount / cols);
+                int imageSize = bestImageSize;
+
+                // 确保最小尺寸
+                imageSize = Math.Max(100, imageSize);
+
+                // 计算总尺寸
+                int totalWidth = cols * (imageSize + spacing) + spacing;
+                int totalHeight = rows * (imageSize + labelHeight + spacing) + spacing;
+
+                // 居中显示
+                int startX = Math.Max(0, (panelWidth - totalWidth + spacing * 2) / 2);
+                int startY = spacing;
+
+                // 重新定位和调整大小现有的图片面板
+                for (int i = 0; i < panelImages.Controls.Count && i < _currentGroup.Images.Count; i++)
+                {
+                    if (panelImages.Controls[i] is Panel imagePanel)
+                    {
+                        int row = i / cols;
+                        int col = i % cols;
+
+                        int x = startX + col * (imageSize + spacing);
+                        int y = startY + row * (imageSize + labelHeight + spacing);
+
+                        imagePanel.Size = new Size(imageSize, imageSize + labelHeight);
+                        imagePanel.Location = new Point(x, y);
+
+                        // 调整内部 PictureBox 和 Label 大小
+                        foreach (Control control in imagePanel.Controls)
+                        {
+                            if (control is PictureBox pictureBox)
+                            {
+                                pictureBox.Size = new Size(imageSize, imageSize);
+                                pictureBox.Location = new Point(0, 0);
+                            }
+                            else if (control is Label label)
+                            {
+                                label.Size = new Size(imageSize, labelHeight);
+                                label.Location = new Point(0, imageSize);
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                panelImages.ResumeLayout(true);
+            }
+        }
+
         private async Task LoadNextGroupAsync()
         {
             try
@@ -143,14 +296,52 @@ namespace ImageAnnotationApp.Forms
             _selectedImageId = -1;
 
             int imageCount = _currentGroup.Images.Count;
-            int cols = (int)Math.Ceiling(Math.Sqrt(imageCount));
-            int rows = (int)Math.Ceiling((double)imageCount / cols);
+            if (imageCount == 0) return;
 
             int panelWidth = panelImages.ClientSize.Width - 20;
             int panelHeight = panelImages.ClientSize.Height - 20;
-            int imageWidth = panelWidth / cols - 10;
-            int imageHeight = panelHeight / rows - 30; // 减少高度，为标签留出空间
+
             int labelHeight = 20; // 标签高度
+            int spacing = 10; // 图片间距
+
+            // 计算最优的行列布局，使图片尽可能大
+            int bestCols = 1;
+            int bestImageSize = 0;
+
+            // 尝试不同的列数，找到能让图片最大的配置
+            for (int testCols = 1; testCols <= imageCount; testCols++)
+            {
+                int testRows = (int)Math.Ceiling((double)imageCount / testCols);
+
+                // 计算在这个布局下图片能有多大
+                int maxWidth = (panelWidth - spacing) / testCols - spacing;
+                int maxHeight = (panelHeight - spacing) / testRows - labelHeight - spacing;
+
+                // 保持1:1比例
+                int testImageSize = Math.Min(maxWidth, maxHeight);
+
+                // 如果这个配置能让图片更大，则采用
+                if (testImageSize > bestImageSize)
+                {
+                    bestImageSize = testImageSize;
+                    bestCols = testCols;
+                }
+            }
+
+            int cols = bestCols;
+            int rows = (int)Math.Ceiling((double)imageCount / cols);
+            int imageSize = bestImageSize;
+
+            // 确保最小尺寸
+            imageSize = Math.Max(100, imageSize);
+
+            // 计算总尺寸
+            int totalWidth = cols * (imageSize + spacing) + spacing;
+            int totalHeight = rows * (imageSize + labelHeight + spacing) + spacing;
+
+            // 居中显示
+            int startX = Math.Max(0, (panelWidth - totalWidth + spacing * 2) / 2);
+            int startY = spacing;
 
             for (int i = 0; i < _currentGroup.Images.Count; i++)
             {
@@ -158,20 +349,20 @@ namespace ImageAnnotationApp.Forms
                 int row = i / cols;
                 int col = i % cols;
 
-                int x = col * (imageWidth + 10) + 10;
-                int y = row * (imageHeight + labelHeight + 10) + 10;
+                int x = startX + col * (imageSize + spacing);
+                int y = startY + row * (imageSize + labelHeight + spacing);
 
                 // 创建图片容器面板
                 var imagePanel = new Panel
                 {
-                    Size = new Size(imageWidth, imageHeight + labelHeight),
+                    Size = new Size(imageSize, imageSize + labelHeight),
                     Location = new Point(x, y),
                     BorderStyle = BorderStyle.None
                 };
 
                 var pictureBox = new PictureBox
                 {
-                    Size = new Size(imageWidth, imageHeight),
+                    Size = new Size(imageSize, imageSize),
                     Location = new Point(0, 0),
                     SizeMode = PictureBoxSizeMode.Zoom,
                     BorderStyle = BorderStyle.FixedSingle,
@@ -185,8 +376,8 @@ namespace ImageAnnotationApp.Forms
                 var lblFolderName = new Label
                 {
                     Text = image.FolderName,
-                    Size = new Size(imageWidth, labelHeight),
-                    Location = new Point(0, imageHeight),
+                    Size = new Size(imageSize, labelHeight),
+                    Location = new Point(0, imageSize),
                     TextAlign = ContentAlignment.MiddleCenter,
                     Font = new Font("Microsoft YaHei UI", 9F),
                     ForeColor = Color.DarkGray
