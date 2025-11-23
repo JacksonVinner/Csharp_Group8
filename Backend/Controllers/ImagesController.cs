@@ -116,6 +116,77 @@ public class ImagesController : ControllerBase
         });
     }
 
+    [HttpPost("upload")]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult> UploadImage([FromForm] int queueId, [FromForm] string folderName, [FromForm] IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new { message = "没有上传文件" });
+        }
+
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            return BadRequest(new { message = "文件夹名称不能为空" });
+        }
+
+        var queue = await _context.Queues.FindAsync(queueId);
+        if (queue == null)
+        {
+            return NotFound(new { message = "队列不存在" });
+        }
+
+        // Create uploads directory if it doesn't exist
+        var uploadsPath = Path.Combine(_environment.ContentRootPath, "uploads", queueId.ToString());
+        Directory.CreateDirectory(uploadsPath);
+
+        // Save file
+        var uniqueFileName = $"{Guid.NewGuid()}_{file.FileName}";
+        var filePath = Path.Combine(uploadsPath, uniqueFileName);
+
+        using (var stream = new FileStream(filePath, FileMode.Create))
+        {
+            await file.CopyToAsync(stream);
+        }
+
+        // Find existing images with the same ImageGroup (filename) to determine Order
+        var existingImagesInGroup = await _context.Images
+            .Where(i => i.QueueId == queueId && i.ImageGroup == file.FileName)
+            .ToListAsync();
+
+        int order = existingImagesInGroup.Count;
+
+        // Create image entity
+        var image = new Image
+        {
+            QueueId = queueId,
+            ImageGroup = file.FileName,
+            FolderName = folderName,
+            FileName = file.FileName,
+            FilePath = $"/uploads/{queueId}/{uniqueFileName}",
+            Order = order,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Images.Add(image);
+        await _context.SaveChangesAsync();
+
+        // Update queue total images count (count unique ImageGroups)
+        var totalGroups = await _context.Images
+            .Where(i => i.QueueId == queueId)
+            .Select(i => i.ImageGroup)
+            .Distinct()
+            .CountAsync();
+        queue.TotalImages = totalGroups;
+        await _context.SaveChangesAsync();
+
+        return Ok(new {
+            message = "上传成功",
+            imageId = image.Id,
+            fileName = file.FileName
+        });
+    }
+
     [HttpPost("import")]
     [Authorize(Roles = "Admin")]
     public async Task<ActionResult> ImportImages([FromForm] int queueId, [FromForm] List<IFormFile> files, [FromForm] List<string> folderNames)

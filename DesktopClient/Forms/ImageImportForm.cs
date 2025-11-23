@@ -28,6 +28,7 @@ namespace ImageAnnotationApp.Forms
         {
             public string Name { get; set; } = string.Empty;
             public List<string> FilePaths { get; set; } = new();
+            public List<string> UploadedFileNames { get; set; } = new();
         }
 
         public ImageImportForm(Models.Queue queue)
@@ -83,16 +84,23 @@ namespace ImageAnnotationApp.Forms
 
             var toolStripFolders = new ToolStrip();
             var btnAddFolder = new ToolStripButton("添加文件夹");
+            var btnAddFromLocalFolder = new ToolStripButton("从本地文件夹添加");
+            var btnRenameFolder = new ToolStripButton("重命名文件夹");
             var btnRemoveFolder = new ToolStripButton("删除文件夹");
             var btnSelectFiles = new ToolStripButton("选择文件");
             var btnClearFiles = new ToolStripButton("清空文件");
 
             btnAddFolder.Click += BtnAddFolder_Click;
+            btnAddFromLocalFolder.Click += BtnAddFromLocalFolder_Click;
+            btnRenameFolder.Click += BtnRenameFolder_Click;
             btnRemoveFolder.Click += BtnRemoveFolder_Click;
             btnSelectFiles.Click += BtnSelectFiles_Click;
             btnClearFiles.Click += BtnClearFiles_Click;
 
             toolStripFolders.Items.Add(btnAddFolder);
+            toolStripFolders.Items.Add(btnAddFromLocalFolder);
+            toolStripFolders.Items.Add(new ToolStripSeparator());
+            toolStripFolders.Items.Add(btnRenameFolder);
             toolStripFolders.Items.Add(btnRemoveFolder);
             toolStripFolders.Items.Add(new ToolStripSeparator());
             toolStripFolders.Items.Add(btnSelectFiles);
@@ -258,6 +266,131 @@ namespace ImageAnnotationApp.Forms
             UpdatePreview();
         }
 
+        private void BtnAddFromLocalFolder_Click(object? sender, EventArgs e)
+        {
+            if (_folders.Count >= _queue.ImageCount)
+            {
+                MessageBox.Show($"最多只能添加 {_queue.ImageCount} 个文件夹", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = "选择包含图片的文件夹",
+                ShowNewFolderButton = false
+            };
+
+            if (dialog.ShowDialog() == DialogResult.OK)
+            {
+                var selectedPath = dialog.SelectedPath;
+                var folderName = Path.GetFileName(selectedPath);
+
+                // 如果文件夹名称为空（比如选择了驱动器根目录），使用完整路径的最后部分
+                if (string.IsNullOrWhiteSpace(folderName))
+                {
+                    folderName = selectedPath.Replace(":", "").Replace("\\", "_");
+                }
+
+                // 检查名称是否已存在
+                if (_folders.ContainsKey(folderName))
+                {
+                    var newName = PromptInput("文件夹名称已存在，请输入新名称:", "重命名", folderName);
+                    if (string.IsNullOrWhiteSpace(newName))
+                        return;
+
+                    if (_folders.ContainsKey(newName))
+                    {
+                        MessageBox.Show("文件夹名称仍然存在", "提示",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    folderName = newName;
+                }
+
+                // 获取文件夹内的所有图片文件
+                var imageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"
+                };
+
+                var allFiles = Directory.GetFiles(selectedPath);
+                var imageFiles = new List<string>();
+
+                foreach (var file in allFiles)
+                {
+                    var ext = Path.GetExtension(file);
+                    if (imageExtensions.Contains(ext))
+                    {
+                        imageFiles.Add(file);
+                    }
+                }
+
+                if (imageFiles.Count == 0)
+                {
+                    MessageBox.Show("该文件夹中没有找到图片文件", "提示",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 添加文件夹和文件
+                _folders[folderName] = new FolderData
+                {
+                    Name = folderName,
+                    FilePaths = new List<string>(imageFiles),
+                    UploadedFileNames = new List<string>()
+                };
+
+                UpdateFoldersList();
+                UpdatePreview();
+
+                MessageBox.Show($"成功添加文件夹：{folderName}\n包含 {imageFiles.Count} 个图片文件", "成功",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void BtnRenameFolder_Click(object? sender, EventArgs e)
+        {
+            if (listViewFolders.SelectedItems.Count == 0)
+            {
+                MessageBox.Show("请选择要重命名的文件夹", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var oldFolderName = listViewFolders.SelectedItems[0].Text;
+            if (!_folders.ContainsKey(oldFolderName))
+                return;
+
+            var newFolderName = PromptInput("新文件夹名称:", "重命名文件夹", oldFolderName);
+            if (string.IsNullOrWhiteSpace(newFolderName))
+                return;
+
+            if (newFolderName == oldFolderName)
+                return;
+
+            if (_folders.ContainsKey(newFolderName))
+            {
+                MessageBox.Show("文件夹名称已存在", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 保存旧文件夹的数据
+            var folderData = _folders[oldFolderName];
+            folderData.Name = newFolderName;
+
+            // 删除旧键，添加新键
+            _folders.Remove(oldFolderName);
+            _folders[newFolderName] = folderData;
+
+            UpdateFoldersList();
+            UpdatePreview();
+
+            MessageBox.Show($"文件夹已重命名：{oldFolderName} → {newFolderName}", "成功",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
         private void BtnRemoveFolder_Click(object? sender, EventArgs e)
         {
             if (listViewFolders.SelectedItems.Count == 0)
@@ -327,25 +460,60 @@ namespace ImageAnnotationApp.Forms
             foreach (var folder in _folders.Values)
             {
                 var item = new ListViewItem(folder.Name);
-                item.SubItems.Add(folder.FilePaths.Count.ToString());
-                var fileNames = string.Join("; ", folder.FilePaths.Select(Path.GetFileName).Take(10));
-                if (folder.FilePaths.Count > 10)
-                    fileNames += $" ... (共 {folder.FilePaths.Count} 个文件)";
+
+                // 计算总文件数（本地文件 + 已上传文件）
+                var totalCount = folder.FilePaths.Count + folder.UploadedFileNames.Count;
+                item.SubItems.Add(totalCount.ToString());
+
+                // 显示文件列表
+                var fileList = new List<string>();
+
+                // 添加已上传的文件（带标记）
+                foreach (var fileName in folder.UploadedFileNames.Take(5))
+                {
+                    fileList.Add($"{fileName} (已上传)");
+                }
+
+                // 添加本地文件
+                foreach (var filePath in folder.FilePaths.Select(Path.GetFileName).Take(10 - folder.UploadedFileNames.Take(5).Count()))
+                {
+                    fileList.Add(filePath);
+                }
+
+                var fileNames = string.Join("; ", fileList);
+                if (totalCount > 10)
+                    fileNames += $" ... (共 {totalCount} 个文件: {folder.UploadedFileNames.Count} 已上传, {folder.FilePaths.Count} 待上传)";
+                else if (folder.UploadedFileNames.Count > 0)
+                    fileNames += $" ({folder.UploadedFileNames.Count} 已上传, {folder.FilePaths.Count} 待上传)";
+
                 item.SubItems.Add(fileNames);
                 item.Tag = folder;
+
+                // 如果有已上传的文件，改变颜色
+                if (folder.UploadedFileNames.Count > 0)
+                {
+                    item.ForeColor = Color.DarkGreen;
+                }
+
                 listViewFolders.Items.Add(item);
             }
         }
 
         private void UpdatePreview()
         {
-            // 获取所有文件名
+            // 获取所有文件名（包括已上传的和本地的）
             var allFileNames = new HashSet<string>();
             foreach (var folder in _folders.Values)
             {
+                // 添加本地文件
                 foreach (var filePath in folder.FilePaths)
                 {
                     allFileNames.Add(Path.GetFileName(filePath));
+                }
+                // 添加已上传的文件
+                foreach (var fileName in folder.UploadedFileNames)
+                {
+                    allFileNames.Add(fileName);
                 }
             }
 
@@ -364,16 +532,49 @@ namespace ImageAnnotationApp.Forms
             {
                 var item = new ListViewItem(fileName);
                 bool isComplete = true;
+                bool allUploaded = true;
 
                 foreach (var folderName in _folders.Keys)
                 {
-                    var hasFile = _folders[folderName].FilePaths.Any(f => Path.GetFileName(f) == fileName);
-                    item.SubItems.Add(hasFile ? "✓" : "✗");
-                    if (!hasFile) isComplete = false;
+                    var hasLocal = _folders[folderName].FilePaths.Any(f => Path.GetFileName(f) == fileName);
+                    var hasUploaded = _folders[folderName].UploadedFileNames.Contains(fileName);
+
+                    if (hasUploaded)
+                    {
+                        item.SubItems.Add("✓ (已上传)");
+                    }
+                    else if (hasLocal)
+                    {
+                        item.SubItems.Add("✓ (待上传)");
+                        allUploaded = false;
+                    }
+                    else
+                    {
+                        item.SubItems.Add("✗");
+                        isComplete = false;
+                        allUploaded = false;
+                    }
+
+                    if (!hasLocal && !hasUploaded) isComplete = false;
                 }
 
-                item.SubItems.Add(isComplete ? "完整" : "不完整");
-                item.ForeColor = isComplete ? Color.Black : Color.Orange;
+                // 设置状态
+                if (allUploaded)
+                {
+                    item.SubItems.Add("已上传");
+                    item.ForeColor = Color.DarkGreen;
+                }
+                else if (isComplete)
+                {
+                    item.SubItems.Add("完整");
+                    item.ForeColor = Color.Black;
+                }
+                else
+                {
+                    item.SubItems.Add("不完整");
+                    item.ForeColor = Color.Orange;
+                }
+
                 listViewPreview.Items.Add(item);
             }
         }
@@ -493,7 +694,14 @@ namespace ImageAnnotationApp.Forms
                 }
                 else
                 {
-                    MessageBox.Show("所有文件上传失败", "错误",
+                    var errorMsg = "所有文件上传失败";
+                    if (result.Errors.Count > 0)
+                    {
+                        errorMsg += "\n\n错误详情:\n" + string.Join("\n", result.Errors.Take(10));
+                        if (result.Errors.Count > 10)
+                            errorMsg += $"\n... 还有 {result.Errors.Count - 10} 个错误";
+                    }
+                    MessageBox.Show(errorMsg, "错误",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
@@ -533,7 +741,8 @@ namespace ImageAnnotationApp.Forms
                         {
                             _folders[kvp.Key] = new FolderData { Name = kvp.Key };
                         }
-                        // 注意：这里不覆盖现有文件，只是显示已存在的文件
+                        // 填充已上传的文件列表
+                        _folders[kvp.Key].UploadedFileNames = kvp.Value;
                     }
 
                     UpdateFoldersList();
