@@ -72,16 +72,16 @@ public class ImageService : IImageService
                 throw new ArgumentException("队列不存在");
             }
 
-            // 提取图片元数据
-            var metadata = await _imageProcessing.ExtractMetadataAsync(fileStream, fileName);
-
-            // 同队列去重：存在则直接返回
-            var existingImage = await _unitOfWork.Images.GetByQueueAndHashAsync(queueId, metadata.FileHash!);
+            // 同队列按“文件夹+文件名”去重：存在则直接返回
+            var existingImage = await _unitOfWork.Images.GetByQueueFolderAndFileNameAsync(queueId, folderName, fileName);
             if (existingImage != null)
             {
                 await _unitOfWork.RollbackTransactionAsync();
                 return (MapToDto(existingImage), true);
             }
+
+            // 提取图片元数据
+            var metadata = await _imageProcessing.ExtractMetadataAsync(fileStream, fileName);
 
             // 保存文件
             fileStream.Position = 0;
@@ -162,7 +162,7 @@ public class ImageService : IImageService
                 throw new ArgumentException("队列不存在");
             }
 
-            // 预处理：按文件名分组，提取元数据与哈希
+            // 预处理：按文件名分组，提取元数据
             var fileGroups = new Dictionary<string, List<PreparedFile>>();
             foreach (var kvp in folderFiles)
             {
@@ -184,9 +184,11 @@ public class ImageService : IImageService
                 }
             }
 
-            // 去重：同队列哈希重复则跳过
-            var allHashes = fileGroups.Values.SelectMany(v => v.Select(f => f.Metadata.FileHash!)).Distinct();
-            var existingHashes = await _unitOfWork.Images.GetHashesByQueueAsync(queueId, allHashes);
+            // 去重：同队列内“文件夹+文件名”重复则跳过
+            var allFileKeys = fileGroups.Values
+                .SelectMany(v => v.Select(f => $"{f.FolderName}|{f.FileName}"))
+                .Distinct();
+            var existingFileKeys = await _unitOfWork.Images.GetFolderFileKeysByQueueAsync(queueId, allFileKeys);
 
             // 处理文件
             foreach (var group in fileGroups)
@@ -211,7 +213,8 @@ public class ImageService : IImageService
                     {
                         try
                         {
-                            if (existingHashes.Contains(prepared.Metadata.FileHash!))
+                            var preparedKey = $"{prepared.FolderName}|{prepared.FileName}";
+                            if (existingFileKeys.Contains(preparedKey))
                             {
                                 result.SkippedCount++;
                                 if (result.SkippedFiles.Count < 50)
@@ -243,7 +246,7 @@ public class ImageService : IImageService
                             };
 
                             await _unitOfWork.Images.AddAsync(image);
-                            existingHashes.Add(prepared.Metadata.FileHash!);
+                            existingFileKeys.Add(preparedKey);
                             result.SuccessCount++;
                         }
                         catch (Exception ex)
