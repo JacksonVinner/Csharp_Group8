@@ -30,6 +30,31 @@ public class RequestResponseLoggingMiddleware
         var correlationId = context.TraceIdentifier ?? Guid.NewGuid().ToString("N");
         context.Response.Headers["X-Correlation-ID"] = correlationId;
 
+        // 对流式导出接口不包裹响应体，避免文件流被提前关闭
+        if (context.Request.Path.StartsWithSegments("/api/export"))
+        {
+            var sw = Stopwatch.StartNew();
+            Exception? exportException = null;
+            try
+            {
+                await _next(context);
+            }
+            catch (Exception ex)
+            {
+                exportException = ex;
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                _logger.LogError(ex, "Export request failed: {Path} CorrelationId={CorrelationId}", context.Request.Path, correlationId);
+            }
+
+            if (context.Response.StatusCode >= StatusCodes.Status400BadRequest)
+            {
+                var logEntry = BuildLogEntry(context, correlationId, sw.ElapsedMilliseconds, null, exportException);
+                await WriteLogAsync(logEntry);
+            }
+
+            return;
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var originalBodyStream = context.Response.Body;
 

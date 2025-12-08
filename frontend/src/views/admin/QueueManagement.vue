@@ -66,12 +66,12 @@
             <el-table :data="queuesStore.queues" v-loading="loading">
               <el-table-column prop="name" label="队列名称" width="180" />
               <el-table-column prop="projectName" label="所属项目" width="150" />
-              <el-table-column prop="imageCount" label="对比图片数" width="120">
+              <el-table-column prop="comparisonCount" label="对比图片数" width="120">
                 <template #default="scope">
-                  {{ scope.row.imageCount }} 张
+                  {{ scope.row.comparisonCount }} 张
                 </template>
               </el-table-column>
-              <el-table-column prop="totalImages" label="总图片数" width="120" />
+              <el-table-column prop="totalImageCount" label="总图片数" width="120" />
               <el-table-column label="图片组数" width="100">
                 <template #default="scope">
                   {{ calculateGroups(scope.row) }}
@@ -116,8 +116,8 @@
           </template>
           <el-descriptions :column="3" border>
             <el-descriptions-item label="队列名称">{{ selectedQueue.name }}</el-descriptions-item>
-            <el-descriptions-item label="对比图片数">{{ selectedQueue.imageCount }} 张</el-descriptions-item>
-            <el-descriptions-item label="当前总图片数">{{ selectedQueue.totalImages }}</el-descriptions-item>
+            <el-descriptions-item label="对比图片数">{{ selectedQueue.comparisonCount }} 张</el-descriptions-item>
+            <el-descriptions-item label="当前总图片数">{{ selectedQueue.totalImageCount }}</el-descriptions-item>
             <el-descriptions-item label="图片组数">{{ calculateGroups(selectedQueue) }}</el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ formatDate(selectedQueue.createdAt) }}</el-descriptions-item>
           </el-descriptions>
@@ -164,10 +164,10 @@
               <template #header>
                 <div class="card-header">
                   <div>
-                    <span>添加文件夹并导入（{{ folders.length }} / {{ selectedQueue.imageCount }}）</span>
+                    <span>添加文件夹并导入（{{ folders.length }} / {{ selectedQueue.comparisonCount }}）</span>
                   </div>
                   <div>
-                    <el-button type="primary" size="small" @click="addFolder" :disabled="folders.length >= selectedQueue.imageCount">
+                    <el-button type="primary" size="small" @click="addFolder" :disabled="folders.length >= selectedQueue.comparisonCount">
                       <el-icon><Plus /></el-icon>添加文件夹
                     </el-button>
                     <el-button type="danger" size="small" @click="clearAllFolders" :disabled="folders.length === 0">
@@ -285,7 +285,7 @@
         </el-form-item>
         <el-form-item label="对比图片数" required>
           <el-input-number 
-            v-model="form.imageCount" 
+            v-model="form.comparisonCount" 
             :min="2" 
             :max="10" 
             placeholder="2-10张"
@@ -336,7 +336,7 @@ const MAX_VISIBLE_FILES = 50
 const form = reactive({
   projectId: null as number | null,
   name: '',
-  imageCount: 3,
+  comparisonCount: 3,
 })
 
 type UploadedFile = { fileName: string; filePath: string }
@@ -385,7 +385,7 @@ const openManager = async (queue: any) => {
   uploading.value = false
   await loadExistingImages()
   if (selectedQueue.value) {
-    while (folders.value.length < selectedQueue.value.imageCount) {
+    while (folders.value.length < selectedQueue.value.comparisonCount) {
       addFolder()
     }
   }
@@ -516,7 +516,7 @@ const handleImport = async () => {
     await loadQueues()
     clearAllFolders()
     if (selectedQueue.value) {
-      while (folders.value.length < selectedQueue.value.imageCount) {
+      while (folders.value.length < selectedQueue.value.comparisonCount) {
         addFolder()
       }
     }
@@ -545,7 +545,7 @@ const showCreateDialog = () => {
   editId.value = null
   form.projectId = selectedProjectId.value || projectsStore.projects[0]?.id || null
   form.name = ''
-  form.imageCount = 3
+  form.comparisonCount = 3
   dialogVisible.value = true
 }
 
@@ -554,7 +554,7 @@ const editQueue = (queue: any) => {
   editId.value = queue.id
   form.projectId = queue.projectId
   form.name = queue.name
-  form.imageCount = queue.imageCount
+  form.comparisonCount = queue.comparisonCount
   dialogVisible.value = true
 }
 
@@ -567,7 +567,7 @@ const submitForm = async () => {
     ElMessage.warning('请输入队列名称')
     return
   }
-  if (!form.imageCount || form.imageCount < 2 || form.imageCount > 10) {
+  if (!form.comparisonCount || form.comparisonCount < 2 || form.comparisonCount > 10) {
     ElMessage.warning('对比图片数必须在2-10之间')
     return
   }
@@ -577,14 +577,14 @@ const submitForm = async () => {
     if (isEdit.value && editId.value) {
       await queuesStore.updateQueue(editId.value, {
         name: form.name,
-        imageCount: form.imageCount,
+        comparisonCount: form.comparisonCount,
       })
       ElMessage.success('更新成功')
     } else {
       await queuesStore.createQueue({
         projectId: form.projectId,
         name: form.name,
-        imageCount: form.imageCount,
+        comparisonCount: form.comparisonCount,
       })
       ElMessage.success('创建成功')
     }
@@ -617,8 +617,8 @@ const deleteQueue = async (id: number) => {
 }
 
 const calculateGroups = (queue: any) => {
-  if (!queue.imageCount || queue.imageCount === 0) return 0
-  return Math.floor(queue.totalImages / queue.imageCount)
+  if (!queue.comparisonCount || queue.comparisonCount === 0) return 0
+  return Math.floor(queue.totalImageCount / queue.comparisonCount)
 }
 
 const formatDate = (dateString: string) => {
